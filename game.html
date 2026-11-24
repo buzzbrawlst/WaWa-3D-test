@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>WaWa Dog — Cork7 Remake</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;600;700&display=swap');
+:root{color-scheme:dark;--lime:#d5ff65;--ink:#101713;--panel:rgba(12,20,16,.78);--line:rgba(230,245,233,.18)}
+*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#b9d6e5;color:#f5f8f2;font-family:'Space Grotesk',sans-serif}
+#game{position:fixed;inset:0}canvas{display:block;width:100%;height:100%}
+.hud{position:fixed;inset:0;pointer-events:none;padding:22px;display:flex;flex-direction:column;justify-content:space-between}
+.top{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}.brand,.stats,.bottom,.message{background:var(--panel);border:1px solid var(--line);backdrop-filter:blur(14px);border-radius:15px}
+.brand{padding:12px 16px}.brand strong{font-size:14px;letter-spacing:.06em}.brand small,.eyebrow{display:block;font:9px 'DM Mono';letter-spacing:.16em;color:#c5d2c9;margin-top:4px}
+.stats{display:flex;gap:22px;padding:12px 17px}.stat label{display:block;font:9px 'DM Mono';color:#b5c6ba;letter-spacing:.12em}.stat b{font-size:20px;letter-spacing:-.04em}
+.bottom{align-self:flex-start;padding:12px 15px;max-width:min(600px,90vw);font:10px 'DM Mono';line-height:1.8;color:#dce7de}.bottom b{color:var(--lime);font-weight:500}
+.message{align-self:center;position:absolute;top:19%;padding:12px 18px;text-align:center;opacity:0;transform:translateY(-8px);transition:.2s;font-weight:600}.message.show{opacity:1;transform:translateY(0)}
+.crosshair{position:absolute;left:50%;top:50%;width:5px;height:5px;border-radius:50%;background:#fff;box-shadow:0 0 0 5px #ffffff20}
+#loading{position:fixed;inset:0;display:grid;place-items:center;background:linear-gradient(#c7e1ec,#e8f1f2);color:#17251d;z-index:5;font:12px 'DM Mono';letter-spacing:.12em}
+#loading span{display:block;margin-top:10px;color:#53675b;font-size:10px;text-align:center}
+@media(max-width:650px){.hud{padding:12px}.stats{gap:12px;padding:9px 11px}.stat b{font-size:16px}.brand{padding:10px 12px}.bottom{font-size:9px}}
+</style>
+</head>
+<body>
+<div id="game"></div>
+<div id="loading">WAWA PEAK — LOADING THE MOUNTAIN<span>Preparing the slopes…</span></div>
+<div class="hud">
+ <div class="top">
+  <div class="brand"><strong>WAWA DOG <span style="color:var(--lime)">/</span> CORK7</strong><small>EARLY PLAYABLE BUILD · 001</small></div>
+  <div class="stats">
+   <div class="stat"><label>SPEED</label><b id="speed">0 <small style="font-size:10px">KM/H</small></b></div>
+   <div class="stat"><label>ALTITUDE</label><b id="altitude">0 M</b></div>
+   <div class="stat"><label>SCORE</label><b id="score">0</b></div>
+  </div>
+ </div>
+ <div class="message" id="message">NICE ONE!</div>
+ <div class="bottom"><b>W A S D</b> STEER &nbsp; <b>SPACE</b> JUMP &nbsp; <b>SHIFT</b> TUCK / BOOST<br><b>1–4</b> TRICKS IN AIR &nbsp; <b>R</b> RESPAWN &nbsp; <b>MOUSE</b> CAMERA</div>
+</div>
+<div class="crosshair"></div>
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"}}</script>
+<script type="module">
+import * as THREE from 'three';
+import {FBXLoader} from 'three/addons/loaders/FBXLoader.js';
+import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
+
+const host=document.querySelector('#game'),scene=new THREE.Scene();
+scene.background=new THREE.Color(0xb8d7e7);scene.fog=new THREE.Fog(0xb8d7e7,90,360);
+const camera=new THREE.PerspectiveCamera(66,innerWidth/innerHeight,.1,700);
+const renderer=new THREE.WebGLRenderer({antialias:true});renderer.setPixelRatio(Math.min(devicePixelRatio,1.8));renderer.setSize(innerWidth,innerHeight);renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFSoftShadowMap;renderer.outputColorSpace=THREE.SRGBColorSpace;renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=1.15;host.appendChild(renderer.domElement);
+scene.add(new THREE.HemisphereLight(0xeaf7ff,0x8295a3,2.0));
+const sun=new THREE.DirectionalLight(0xfff7e9,2.5);sun.position.set(-65,100,35);sun.castShadow=true;sun.shadow.mapSize.set(2048,2048);sun.shadow.camera.left=-100;sun.shadow.camera.right=100;sun.shadow.camera.top=100;sun.shadow.camera.bottom=-100;scene.add(sun);
+const snowMat=new THREE.MeshStandardMaterial({color:0xf1f6f8,roughness:.96});
+const iceMat=new THREE.MeshStandardMaterial({color:0xbad2dc,roughness:.75});
+const darkTree=new THREE.MeshStandardMaterial({color:0x304b48,roughness:1});
+const trunkMat=new THREE.MeshStandardMaterial({color:0x665d52});
+const flagMat=new THREE.MeshStandardMaterial({color:0xe84d55,roughness:.8});
+const slope=(x,z)=>Math.max(0,25-z*.22 + Math.sin(z*.035)*2 + Math.sin(x*.035+z*.02)*1.1);
+function terrain(){
+ const geo=new THREE.PlaneGeometry(260,520,100,180);geo.rotateX(-Math.PI/2);
+ const p=geo.attributes.position;for(let i=0;i<p.count;i++){const x=p.getX(i),z=-p.getY(i);p.setY(i,slope(x,z));}
+ geo.computeVertexNormals();const mesh=new THREE.Mesh(geo,snowMat);mesh.position.z=-190;mesh.receiveShadow=true;scene.add(mesh);
+ // distant alpine ridges
+ for(let i=0;i<18;i++){const x=(Math.random()-.5)*420,z=-260-Math.random()*100,y=30+Math.random()*35;const m=new THREE.Mesh(new THREE.ConeGeometry(18+Math.random()*18,y,5),new THREE.MeshStandardMaterial({color:i%2?0xd9e8ed:0xaec7d2,roughness:1}));m.position.set(x,y*.38,z);m.rotation.y=Math.random()*1.5;scene.add(m);}
+ // pine trees placed to frame the ski run
+ for(let i=0;i<170;i++){const z=8+Math.random()*420,side=Math.random()<.5?-1:1,x=side*(22+Math.random()*72),y=slope(x,z);const g=new THREE.Group();const h=3+Math.random()*5;const trunk=new THREE.Mesh(new THREE.CylinderGeometry(.16,.28,h*.55,6),trunkMat);trunk.position.y=h*.27;trunk.castShadow=true;g.add(trunk);for(let j=0;j<3;j++){const c=new THREE.Mesh(new THREE.ConeGeometry(1.5-j*.28,h*.34,7),darkTree);c.position.y=h*.42+j*h*.2;c.castShadow=true;g.add(c);}g.position.set(x,y,z-190);scene.add(g);}
+ // course gates
+ for(let z=18;z<370;z+=24){for(const x of [-7,7]){const pole=new THREE.Mesh(new THREE.CylinderGeometry(.07,.07,2.4,8),flagMat);pole.position.set(x,slope(x,z)+1.2,z-190);pole.castShadow=true;scene.add(pole);const flag=new THREE.Mesh(new THREE.BoxGeometry(.9,.45,.04),flagMat);flag.position.set(x+.42,slope(x,z)+2.1,z-190);scene.add(flag);}}
+ // rails and kicker features, positioned along the route
+ const rail=new THREE.Mesh(new THREE.BoxGeometry(1, .18, 11),new THREE.MeshStandardMaterial({color:0x3b4c50,metalness:.55,roughness:.35}));rail.position.set(-11,slope(-11,95)+1.1,95-190);rail.rotation.x=-.08;rail.castShadow=true;scene.add(rail);
+ const kicker=new THREE.Mesh(new THREE.BoxGeometry(13,1.1,8),snowMat);kicker.position.set(0,slope(0,160)+.25,160-190);kicker.rotation.x=-.12;kicker.castShadow=true;scene.add(kicker);
+}
+terrain();
+const rider=new THREE.Group();scene.add(rider);
+const skis=new THREE.Group();rider.add(skis);
+const skiMat=new THREE.MeshStandardMaterial({color:0x202b2a,metalness:.25,roughness:.4});
+for(const x of [-.38,.38]){const board=new THREE.Mesh(new THREE.BoxGeometry(.17,.09,2.25),skiMat);board.position.set(x,-.88,-.15);board.castShadow=true;skis.add(board);const tip=new THREE.Mesh(new THREE.SphereGeometry(.085,10,8),skiMat);tip.scale.set(1,.55,1.5);tip.position.set(x,-.88,-1.25);skis.add(tip);}
+const loader=new FBXLoader();let dog=null,bones=[],rest=new Map();
+loader.load('./Assets/Model/base.fbx',obj=>{
+ dog=obj;const tex=new THREE.TextureLoader().load('./Assets/Textures/shaded.png');tex.colorSpace=THREE.SRGBColorSpace;tex.flipY=false;
+ dog.traverse(o=>{if(o.isMesh){o.castShadow=true;o.receiveShadow=true;const ms=Array.isArray(o.material)?o.material:[o.material];ms.forEach(m=>{m.map=tex;m.color.set(0xffffff);m.needsUpdate=true;});}});
+ const box=new THREE.Box3().setFromObject(dog),size=box.getSize(new THREE.Vector3()),center=box.getCenter(new THREE.Vector3());dog.position.sub(center);dog.position.y+=size.y/2;dog.scale.setScalar(1.65/Math.max(size.x,size.y,size.z));dog.position.y-=.88;dog.rotation.y=Math.PI; // face downhill
+ rider.add(dog);bones=[];dog.traverse(o=>{if(o.isBone){bones.push(o);rest.set(o,{q:o.quaternion.clone(),p:o.position.clone()});}});
+ document.querySelector('#loading').style.display='none';
+},undefined,e=>{console.error(e);document.querySelector('#loading').innerHTML='MODEL LOAD FAILED<span>Check Assets/Model/base.fbx and Assets/Textures/shaded.png</span>';});
+const state={x:0,z:0,v:0,lateral:0,air:false,vy:0,spin:0,score:0,runScore:0,airTime:0};
+const keys={};addEventListener('keydown',e=>{keys[e.code]=true;if(['Space','ArrowUp','ArrowDown'].includes(e.code))e.preventDefault();if(e.code==='Space'&&!state.air){state.air=true;state.vy=8.5;state.airTime=0;}if(/^Digit[1-4]$/.test(e.code)&&state.air){const n=Number(e.code.slice(-1));state.spin+=n===1?Math.PI*2:n===2?Math.PI*4:n===3?Math.PI*2:Math.PI;state.runScore+=n*100;}if(e.code==='KeyR')respawn();});
+addEventListener('keyup',e=>keys[e.code]=false);
+function respawn(){state.x=0;state.z=0;state.v=0;state.vy=0;state.air=false;state.spin=0;rider.position.set(0,slope(0,0),0);rider.rotation.set(0,0,0);}
+let cameraYaw=0,cameraPitch=.2,drag=false,lastX=0,lastY=0;
+renderer.domElement.addEventListener('pointerdown',e=>{drag=true;lastX=e.clientX;lastY=e.clientY;renderer.domElement.setPointerCapture(e.pointerId);});
+renderer.domElement.addEventListener('pointermove',e=>{if(!drag)return;cameraYaw-=(e.clientX-lastX)*.004;cameraPitch=THREE.MathUtils.clamp(cameraPitch+(e.clientY-lastY)*.003,-.1,.8);lastX=e.clientX;lastY=e.clientY;});
+renderer.domElement.addEventListener('pointerup',()=>drag=false);
+renderer.domElement.addEventListener('pointercancel',()=>drag=false);
+const speedEl=document.querySelector('#speed'),altEl=document.querySelector('#altitude'),scoreEl=document.querySelector('#score'),msg=document.querySelector('#message');let msgTimer=0;
+function showMessage(t){msg.textContent=t;msg.classList.add('show');msgTimer=1.5;}
+const clock=new THREE.Clock();
+function frame(){requestAnimationFrame(frame);const dt=Math.min(clock.getDelta(),.035),ground=slope(state.x,state.z);
+ const steer=(keys.KeyA||keys.ArrowLeft?-1:0)+(keys.KeyD||keys.ArrowRight?1:0);
+ const brake=keys.KeyS||keys.ArrowDown,boost=keys.ShiftLeft||keys.ShiftRight;
+ state.v+= (boost?4.4:2.5)*dt; if(brake)state.v-=8*dt;state.v=THREE.MathUtils.clamp(state.v,0,boost?29:23);
+ state.x+=steer*(2.3+state.v*.16)*dt;state.x=THREE.MathUtils.clamp(state.x,-17,17);state.z+=state.v*dt;
+ if(state.air){state.airTime+=dt;state.vy-=15*dt;rider.position.y+=state.vy*dt;rider.rotation.z=THREE.MathUtils.damp(rider.rotation.z,-steer*.18,.9,dt);rider.rotation.y=state.spin; if(rider.position.y<=ground+.05&&state.vy<0){state.air=false;rider.position.y=ground;rider.rotation.x=0;rider.rotation.y=0;rider.rotation.z=0;if(state.spin){state.score+=state.runScore;showMessage('TRICK LANDED  +'+state.runScore);state.runScore=0;state.spin=0;}else showMessage('LANDING');}}
+ else {rider.position.y=ground;rider.rotation.y=steer*.14;rider.rotation.z=THREE.MathUtils.damp(rider.rotation.z,-steer*.12,5,dt);}
+ rider.position.x=state.x;rider.position.z=state.z-190;
+ if(dog){const pulse=Math.sin(performance.now()*.006)*.025;dog.position.y=-.88+pulse;for(const b of bones){const r=rest.get(b);b.quaternion.copy(r.q);b.position.copy(r.p);}const tail=bones.find(b=>/tail/i.test(b.name));if(tail)tail.rotation.y+=Math.sin(performance.now()*.012)*.08;}
+ const target=new THREE.Vector3(state.x*.7, rider.position.y+2.0, state.z-190+5);
+ const behind=new THREE.Vector3(Math.sin(cameraYaw)*8,4.2+cameraPitch*5,Math.cos(cameraYaw)*8);
+ camera.position.lerp(target.clone().add(behind),1-Math.exp(-4*dt));camera.lookAt(target);
+ speedEl.innerHTML=Math.round(state.v*3.6)+' <small style="font-size:10px">KM/H</small>';altEl.textContent=Math.round(Math.max(0,rider.position.y))+' M';scoreEl.textContent=(state.score+state.runScore).toLocaleString();
+ if(msgTimer>0){msgTimer-=dt;if(msgTimer<=0)msg.classList.remove('show');}
+ renderer.render(scene,camera);
+}
+respawn();frame();
+addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);});
+</script>
+</body></html>
